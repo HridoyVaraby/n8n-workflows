@@ -1,0 +1,263 @@
+{
+  "name": "Gmail Inbox Cleanup Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily Cleanup Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 100,
+        "simple": true,
+        "filters": {
+          "q": "is:unread newer_than:1d",
+          "labelIds": [
+            "INBOX"
+          ]
+        }
+      },
+      "id": "gmail-fetch",
+      "name": "Fetch Recent Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2 account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "spam-keywords",
+              "leftValue": "={{ $json.subject }}",
+              "rightValue": "unsubscribe|promotion|deal|offer|sale|discount|free|winner|congratulations|urgent|limited time|act now|click here|buy now",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "promotional-senders",
+              "leftValue": "={{ $json.from }}",
+              "rightValue": "noreply|no-reply|marketing|promo|newsletter|deals|offers|notifications",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "promotional-labels",
+              "leftValue": "={{ $json.labelIds }}",
+              "rightValue": ["CATEGORY_PROMOTIONS"],
+              "operator": {
+                "type": "array",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "spam-labels",
+              "leftValue": "={{ $json.labelIds }}",
+              "rightValue": ["SPAM"],
+              "operator": {
+                "type": "array",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "filter-unwanted",
+      "name": "Filter Unwanted Emails",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-spam",
+              "leftValue": "={{ $json.labelIds }}",
+              "rightValue": ["SPAM"],
+              "operator": {
+                "type": "array",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-spam",
+      "name": "Check if Spam",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "delete",
+        "messageId": "={{ $json.id }}"
+      },
+      "id": "delete-spam",
+      "name": "Delete Spam Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2 account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": [
+          "TRASH"
+        ]
+      },
+      "id": "archive-promotional",
+      "name": "Archive Promotional Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        400
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2 account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily Cleanup Schedule": {
+      "main": [
+        [
+          {
+            "node": "Fetch Recent Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Recent Emails": {
+      "main": [
+        [
+          {
+            "node": "Filter Unwanted Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Unwanted Emails": {
+      "main": [
+        [
+          {
+            "node": "Check if Spam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Spam": {
+      "main": [
+        [
+          {
+            "node": "Delete Spam Emails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Archive Promotional Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-20T12:00:00.000Z",
+      "updatedAt": "2025-01-20T12:00:00.000Z",
+      "id": "email-automation",
+      "name": "Email Automation"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-20T12:00:00.000Z",
+  "versionId": "1"
+}

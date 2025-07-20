@@ -1,0 +1,117 @@
+{
+  "name": "Gmail Spam Folder Cleanup",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 3,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily Cleanup Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "labelIds": [
+            "SPAM"
+          ]
+        }
+      },
+      "id": "gmail-fetch-spam",
+      "name": "Fetch Spam Messages",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2 account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "delete",
+        "messageId": "={{ $json.id }}"
+      },
+      "id": "gmail-delete-spam",
+      "name": "Delete Spam Message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2 account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily Cleanup Schedule": {
+      "main": [
+        [
+          {
+            "node": "Fetch Spam Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Spam Messages": {
+      "main": [
+        [
+          {
+            "node": "Delete Spam Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-20T12:00:00.000Z",
+      "updatedAt": "2025-01-20T12:00:00.000Z",
+      "id": "email-automation",
+      "name": "Email Automation"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-20T12:00:00.000Z",
+  "versionId": "1"
+}

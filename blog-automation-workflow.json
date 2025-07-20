@@ -1,0 +1,360 @@
+{
+    "name": "Automated Blog Creation Pipeline",
+    "nodes": [
+        {
+            "id": "cron-trigger",
+            "name": "Daily Blog Schedule",
+            "type": "n8n-nodes-base.cron",
+            "typeVersion": 1,
+            "position": [
+                100,
+                200
+            ],
+            "parameters": {
+                "triggerTimes": {
+                    "item": [
+                        {
+                            "mode": "everyDay",
+                            "hour": 8,
+                            "minute": 0
+                        },
+                        {
+                            "mode": "everyDay",
+                            "hour": 18,
+                            "minute": 0
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "google-sheets",
+            "name": "Get Blog Titles",
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.6,
+            "position": [
+                300,
+                200
+            ],
+            "parameters": {
+                "resource": "sheet",
+                "operation": "read",
+                "documentId": "YOUR_GOOGLE_SHEET_ID",
+                "sheetName": "Blog Topics",
+                "range": "A:B",
+                "options": {
+                    "valueRenderMode": "FORMATTED_VALUE"
+                }
+            },
+            "credentials": {
+                "googleSheetsOAuth2Api": {
+                    "id": "google-sheets-credential",
+                    "name": "Google Sheets OAuth2"
+                }
+            }
+        },
+        {
+            "id": "normalize-data",
+            "name": "Normalize Sheet Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                400,
+                200
+            ],
+            "parameters": {
+                "language": "javaScript",
+                "jsCode": "// Normalize Google Sheets data to ensure consistent field names\nconst items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n  \n  // Handle different possible field names from Google Sheets\n  const title = data.Title || data.title || data.A || '';\n  const keywords = data.Keywords || data.keywords || data.B || '';\n  \n  return {\n    json: {\n      title: title.toString().trim(),\n      keywords: keywords.toString().trim(),\n      originalData: data // Keep original for debugging\n    }\n  };\n});"
+            }
+        },
+        {
+            "id": "groq-model",
+            "name": "Groq AI Model",
+            "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+            "typeVersion": 1,
+            "position": [
+                600,
+                100
+            ],
+            "parameters": {
+                "model": "llama3-8b-8192"
+            },
+            "credentials": {
+                "groqApi": {
+                    "id": "groq-credential",
+                    "name": "Groq API"
+                }
+            }
+        },
+        {
+            "id": "content-generator",
+            "name": "Generate Blog Content",
+            "type": "@n8n/n8n-nodes-langchain.chainLlm",
+            "typeVersion": 1.7,
+            "position": [
+                600,
+                200
+            ],
+            "parameters": {
+                "promptType": "define",
+                "text": "Create a comprehensive, SEO-optimized blog post about: {{ $json.title }}\n\nRequirements:\n- Write 800-1200 words\n- Include engaging introduction and conclusion\n- Use proper headings (H2, H3)\n- Add relevant keywords naturally\n- Include actionable insights\n- Write in a conversational, professional tone\n- Add meta description (150-160 characters)\n\nStructure:\n1. Compelling title\n2. Meta description\n3. Introduction\n4. Main content with subheadings\n5. Conclusion with call-to-action\n\nTopic: {{ $json.title }}\nKeywords: {{ $json.keywords || 'general topic keywords' }}"
+            }
+        },
+        {
+            "id": "image-search",
+            "name": "Search Unsplash Images",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                800,
+                200
+            ],
+            "parameters": {
+                "method": "GET",
+                "url": "https://api.unsplash.com/search/photos",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "query",
+                            "value": "={{ ($json.title || 'blog').replace(/[^a-zA-Z0-9\\s]/g, '').trim() }}"
+                        },
+                        {
+                            "name": "per_page",
+                            "value": "5"
+                        },
+                        {
+                            "name": "orientation",
+                            "value": "landscape"
+                        }
+                    ]
+                },
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Client-ID YOUR_UNSPLASH_ACCESS_KEY"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "select-image",
+            "name": "Select Best Image",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1000,
+                200
+            ],
+            "parameters": {
+                "language": "javaScript",
+                "jsCode": "// Select the first high-quality image from Unsplash results\nconst images = $input.all();\nconst blogData = images[0];\nconst unsplashData = images[1];\n\nif (!unsplashData.json.results || unsplashData.json.results.length === 0) {\n  // Fallback to a default image if no results\n  return [{\n    json: {\n      ...blogData.json,\n      selectedImage: {\n        url: 'https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?w=1200',\n        alt: blogData.json.title || 'Blog post featured image',\n        photographer: 'Unsplash',\n        download_url: 'https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?w=1200&q=80'\n      }\n    }\n  }];\n}\n\nconst selectedImage = unsplashData.json.results[0];\n\nreturn [{\n  json: {\n    ...blogData.json,\n    selectedImage: {\n      url: selectedImage.urls.regular,\n      alt: selectedImage.alt_description || blogData.json.title,\n      photographer: selectedImage.user.name,\n      download_url: selectedImage.urls.regular,\n      credit_url: selectedImage.links.html\n    }\n  }\n}];"
+            }
+        },
+        {
+            "id": "download-image",
+            "name": "Download Featured Image",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1200,
+                200
+            ],
+            "parameters": {
+                "method": "GET",
+                "url": "={{ $json.selectedImage.download_url }}",
+                "options": {
+                    "response": {
+                        "response": {
+                            "responseFormat": "file"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "id": "format-content",
+            "name": "Format WordPress Content",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1400,
+                200
+            ],
+            "parameters": {
+                "language": "javaScript",
+                "jsCode": "// Format the content for WordPress with proper HTML and image integration\nconst data = $input.all();\nconst contentData = data[0];\nconst imageData = data[1];\n\n// Validate inputs\nif (!contentData || !contentData.json) {\n  throw new Error('Content data is missing or invalid');\n}\n\n// Use the original title from Google Sheets - DO NOT extract from AI response\nconst title = contentData.json.title || 'Untitled Post';\n\n// Extract content from AI response\nconst aiResponse = contentData.json.response?.text || contentData.json.text || '';\nconst lines = aiResponse.split('\\n').filter(line => line.trim());\n\n// Debug logging\nconsole.log('=== DEBUG: Format WordPress Content ===');\nconsole.log('Using original title from Google Sheets:', title);\nconsole.log('AI Response length:', aiResponse.length);\n\n// Extract meta description from AI response\nlet metaDescription = '';\nconst metaIndex = lines.findIndex(line => line.toLowerCase().includes('meta description'));\nif (metaIndex !== -1 && metaIndex + 1 < lines.length) {\n  metaDescription = lines[metaIndex + 1].trim();\n}\n\n// Clean and format content - remove any generated titles and meta descriptions\nlet content = aiResponse\n  .replace(/^.*?meta description.*?$/gmi, '') // Remove meta description lines\n  .replace(/^.*?title:.*?$/gmi, '') // Remove title lines\n  .replace(/^.*?compelling title.*?$/gmi, '') // Remove compelling title lines\n  .replace(/^.*?unlocking the power.*?$/gmi, '') // Remove specific generated title\n  .replace(/^#{1,6}\\s*compelling.*$/gmi, '') // Remove markdown headers with 'compelling'\n  .replace(/^#{1,6}\\s*unlocking.*$/gmi, '') // Remove markdown headers with 'unlocking'\n  .replace(/^#{1,3}\\s+(.+)$/gm, '<h2>$1</h2>') // Convert remaining markdown headers\n  .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>') // Bold text\n  .replace(/\\*(.+?)\\*/g, '<em>$1</em>') // Italic text\n  .replace(/\\n\\s*\\n/g, '</p><p>') // Convert double line breaks to paragraph breaks\n  .replace(/^\\s+|\\s+$/g, '') // Trim whitespace\n  .replace(/^<\\/p>|<p>$/g, ''); // Remove leading/trailing paragraph tags\n\n// Wrap in paragraph tags if needed\nif (content && !content.startsWith('<')) {\n  content = '<p>' + content + '</p>';\n}\n\n// Clean up any empty paragraphs or malformed HTML\ncontent = content\n  .replace(/<p>\\s*<\\/p>/g, '') // Remove empty paragraphs\n  .replace(/<p>\\s*<h2>/g, '<h2>') // Fix paragraph before headers\n  .replace(/<\\/h2>\\s*<\\/p>/g, '</h2>'); // Fix paragraph after headers\n\n// Add featured image credit at the end\nconst imageCredit = `<p><em>Featured image by <a href=\"${contentData.json.selectedImage?.credit_url || '#'}\" target=\"_blank\">${contentData.json.selectedImage?.photographer || 'Unsplash'}</a> on Unsplash</em></p>`;\n\n// Prepare the result object\nconst result = {\n  title: title, // Always use the original title from Google Sheets\n  content: (content || 'No content generated') + imageCredit,\n  excerpt: metaDescription || (title ? title.substring(0, 150) + '...' : 'Blog post excerpt'),\n  status: 'publish',\n  categories: [1], // Default category - adjust as needed\n  tags: contentData.json.keywords ? contentData.json.keywords.split(',').map(k => k.trim()) : []\n};\n\nconsole.log('Final result title:', result.title);\nconsole.log('Content preview:', result.content.substring(0, 200) + '...');\n\nreturn [{ json: result }];"
+            }
+        },
+        {
+            "id": "debug-before-wordpress",
+            "name": "Debug Before WordPress",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1500,
+                200
+            ],
+            "parameters": {
+                "language": "javaScript",
+                "jsCode": "// Debug the data before sending to WordPress\nconst data = $input.all()[0].json;\n\nconsole.log('=== DEBUG: Data Before WordPress ===');\nconsole.log('Title:', data.title);\nconsole.log('Title type:', typeof data.title);\nconsole.log('Title length:', data.title ? data.title.length : 'N/A');\nconsole.log('Content length:', data.content ? data.content.length : 'N/A');\nconsole.log('Excerpt:', data.excerpt);\nconsole.log('Categories:', data.categories);\nconsole.log('Tags:', data.tags);\nconsole.log('Status:', data.status);\nconsole.log('Full data object:', JSON.stringify(data, null, 2));\n\n// Validate and clean data for WordPress\nconst cleanData = {\n  title: String(data.title || 'Untitled Post').trim(),\n  content: String(data.content || 'No content available').trim(),\n  excerpt: String(data.excerpt || '').trim(),\n  categories: Array.isArray(data.categories) ? data.categories : [1],\n  tags: Array.isArray(data.tags) ? data.tags : [],\n  status: 'publish'\n};\n\n// Validate required fields\nconst errors = [];\nif (!cleanData.title || cleanData.title === 'Untitled Post') {\n  errors.push('Title is missing or empty');\n}\nif (!cleanData.content || cleanData.content === 'No content available') {\n  errors.push('Content is missing or empty');\n}\n\nif (errors.length > 0) {\n  console.error('Validation errors:', errors);\n  console.log('Proceeding with available data...');\n}\n\nconsole.log('Clean data for WordPress:', JSON.stringify(cleanData, null, 2));\nreturn [{ json: cleanData }];"
+            }
+        },
+        {
+            "id": "wordpress-publish",
+            "name": "Publish to WordPress",
+            "type": "n8n-nodes-base.wordpress",
+            "typeVersion": 1,
+            "position": [
+                1600,
+                200
+            ],
+            "parameters": {
+                "resource": "post",
+                "operation": "create",
+                "title": "={{ $json.title }}",
+                "additionalFields": {
+                    "content": "={{ $json.content }}",
+                    "excerpt": "={{ $json.excerpt }}",
+                    "status": "publish",
+                    "categories": "={{ $json.categories }}",
+                    "tags": "={{ $json.tags }}"
+                }
+            },
+            "credentials": {
+                "wordpressApi": {
+                    "id": "wordpress-credential",
+                    "name": "WordPress API"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Daily Blog Schedule": {
+            "main": [
+                [
+                    {
+                        "node": "Get Blog Titles",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Blog Titles": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Sheet Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize Sheet Data": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Blog Content",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Groq AI Model": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "Generate Blog Content",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate Blog Content": {
+            "main": [
+                [
+                    {
+                        "node": "Search Unsplash Images",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Select Best Image",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Search Unsplash Images": {
+            "main": [
+                [
+                    {
+                        "node": "Select Best Image",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Select Best Image": {
+            "main": [
+                [
+                    {
+                        "node": "Download Featured Image",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Format WordPress Content",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Download Featured Image": {
+            "main": [
+                [
+                    {
+                        "node": "Format WordPress Content",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Format WordPress Content": {
+            "main": [
+                [
+                    {
+                        "node": "Debug Before WordPress",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Debug Before WordPress": {
+            "main": [
+                [
+                    {
+                        "node": "Publish to WordPress",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    }
+}

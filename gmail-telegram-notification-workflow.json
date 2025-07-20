@@ -1,0 +1,154 @@
+{
+  "name": "Gmail Primary Inbox to Telegram Notifications",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "event": "messageReceived",
+        "simple": true,
+        "filters": {
+          "readStatus": "unread",
+          "q": "category:primary",
+          "labelIds": [
+            "INBOX"
+          ],
+          "includeSpamTrash": false
+        },
+        "options": {
+          "downloadAttachments": false
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Monitor Gmail Primary Inbox",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2 account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "from",
+              "value": "={{ $json.from }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ $json.subject }}"
+            },
+            {
+              "name": "snippet",
+              "value": "={{ $json.snippet }}"
+            },
+            {
+              "name": "receivedTime",
+              "value": "={{ $json.internalDate ? new Date(parseInt($json.internalDate)).toLocaleString() : '' }}"
+            },
+            {
+              "name": "emailLink",
+              "value": "=https://mail.google.com/mail/u/0/#inbox/{{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-node",
+      "name": "Extract Email Details",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🔔 *New Email Alert*\n\n*From:* {{ $json.from }}\n*Subject:* {{ $json.subject }}\n*Received:* {{ $json.receivedTime }}\n\n*Preview:*\n{{ $json.snippet }}\n\n[Open Email]({{ $json.emailLink }})",
+        "additionalFields": {
+          "parseMode": "Markdown",
+          "disableWebPagePreview": true,
+          "disableNotification": false
+        }
+      },
+      "id": "telegram",
+      "name": "Send Telegram Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-api",
+          "name": "Telegram API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Monitor Gmail Primary Inbox": {
+      "main": [
+        [
+          {
+            "node": "Extract Email Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Email Details": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "timezone": "UTC"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-20T12:00:00.000Z",
+      "updatedAt": "2025-01-20T12:00:00.000Z",
+      "id": "email-automation",
+      "name": "Email Automation"
+    },
+    {
+      "createdAt": "2025-01-20T12:00:00.000Z",
+      "updatedAt": "2025-01-20T12:00:00.000Z",
+      "id": "notifications",
+      "name": "Notifications"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-20T12:00:00.000Z",
+  "versionId": "1"
+}
