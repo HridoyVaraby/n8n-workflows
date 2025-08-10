@@ -1,65 +1,72 @@
 {
-  "name": "Automated Blog Post Creation",
+  "meta": {
+    "instanceId": "smart-blog-factory-v2"
+  },
   "nodes": [
     {
       "parameters": {
         "rule": {
           "interval": [
             {
-              "field": "hours",
-              "hoursInterval": 6
+              "triggerInterval": "hours",
+              "hoursBetweenTriggers": 3
             }
           ]
         }
       },
-      "id": "schedule-trigger",
-      "name": "Every 6 Hours Trigger",
+      "id": "1",
+      "name": "Blog Factory Timer",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        240,
-        300
+        100,
+        400
       ]
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
         "resource": "sheet",
         "operation": "read",
-        "documentId": "={{ $env.GOOGLE_SHEET_ID }}",
-        "sheetName": "Sheet1",
-        "range": "A:C",
+        "documentId": {
+          "mode": "id",
+          "value": "={{ $vars.GOOGLE_SHEET_ID }}"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Blog Titles"
+        },
+        "range": "A:B",
         "options": {
-          "dataStructure": "object"
+          "headerRow": true
         }
       },
-      "id": "google-sheets",
-      "name": "Get Blog Titles from Sheet",
+      "id": "2",
+      "name": "Fetch Blog Ideas",
       "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.6,
+      "typeVersion": 4.7,
       "position": [
-        460,
-        300
+        300,
+        400
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "google-sheets-oauth",
-          "name": "Google Sheets OAuth2 API"
+          "name": "Google Sheets OAuth2"
         }
-      },
-      "onError": "continueRegularOutput"
+      }
     },
     {
       "parameters": {
-        "jsCode": "// Select a random blog title from the sheet\nconst items = $input.all();\n\n// Filter out empty rows and already used titles\nconst availableTitles = items.filter(item => \n  item.json.Title && \n  item.json.Title.trim() !== '' && \n  (!item.json.Status || item.json.Status.toLowerCase() !== 'published')\n);\n\nif (availableTitles.length === 0) {\n  throw new Error('No available blog titles found in the sheet');\n}\n\n// Select a random title\nconst randomIndex = Math.floor(Math.random() * availableTitles.length);\nconst selectedTitle = availableTitles[randomIndex];\n\n// Add row number for later update\nconst originalIndex = items.findIndex(item => \n  item.json.Title === selectedTitle.json.Title\n);\n\nreturn [{\n  json: {\n    title: selectedTitle.json.Title,\n    category: selectedTitle.json.Category || 'General',\n    rowNumber: originalIndex + 2, // +2 because sheets are 1-indexed and we assume header row\n    keywords: selectedTitle.json.Keywords || selectedTitle.json.Title\n  }\n}];"
+        "batchSize": 1,
+        "options": {}
       },
-      "id": "select-title",
-      "name": "Select Random Title",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "3",
+      "name": "Process One by One",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
       "position": [
-        680,
-        300
+        500,
+        400
       ]
     },
     {
@@ -67,49 +74,46 @@
         "resource": "text",
         "operation": "message",
         "modelId": {
-          "value": "gemini-1.5-flash",
-          "mode": "list"
+          "mode": "name",
+          "value": "gemini-1.5-flash"
         },
         "messages": {
           "values": [
             {
-              "content": "=Write a comprehensive, engaging blog post about \"{{ $json.title }}\". \n\nRequirements:\n- Write 800-1200 words\n- Include an engaging introduction\n- Use proper headings and subheadings (H2, H3)\n- Include practical tips or insights\n- Write in a conversational, informative tone\n- Add a compelling conclusion\n- Focus on providing value to readers\n- Include relevant examples where appropriate\n- Make it SEO-friendly with natural keyword usage\n\nCategory: {{ $json.category }}\nKeywords to include: {{ $json.keywords }}\n\nPlease format the content in HTML with proper heading tags (h2, h3), paragraph tags (p), and list tags (ul, ol) where appropriate.",
-              "role": "user"
+              "content": "Write a comprehensive, SEO-optimized blog post about: {{ $json.title }}\n\nCategory: {{ $json.category || 'Technology' }}\n\nRequirements:\n- 1000-1500 words\n- Include H2 and H3 headings with proper HTML tags\n- Write in professional, engaging tone\n- Include actionable insights and examples\n- Add compelling introduction and conclusion\n- Optimize for SEO with relevant keywords\n- Use proper HTML formatting (p, h2, h3, ul, li tags)\n\nReturn the content as a well-structured HTML blog post."
             }
           ]
-        },
-        "simplify": true,
-        "options": {}
+        }
       },
-      "id": "gemini-content",
-      "name": "Generate Blog Content with Gemini",
+      "id": "4",
+      "name": "AI Content Writer",
       "type": "@n8n/n8n-nodes-langchain.googleGemini",
       "typeVersion": 1,
       "position": [
-        900,
-        300
+        700,
+        400
       ],
       "credentials": {
-        "googleGeminiApi": {
-          "id": "google-gemini-api",
-          "name": "Google Gemini API"
+        "googleGeminiOAuth2Api": {
+          "id": "google-gemini-oauth",
+          "name": "Google Gemini OAuth2"
         }
-      },
-      "onError": "continueRegularOutput"
+      }
     },
     {
       "parameters": {
-        "url": "=https://api.unsplash.com/search/photos",
+        "method": "GET",
+        "url": "https://api.unsplash.com/search/photos",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
             {
               "name": "query",
-              "value": "={{ $('Select Random Title').item.json.keywords }}"
+              "value": "={{ $json.title }}"
             },
             {
               "name": "per_page",
-              "value": "5"
+              "value": "1"
             },
             {
               "name": "orientation",
@@ -122,252 +126,242 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "=Client-ID {{ $env.UNSPLASH_ACCESS_KEY }}"
+              "value": "Client-ID {{ $vars.UNSPLASH_ACCESS_KEY }}"
             }
           ]
         },
-        "options": {}
-      },
-      "id": "unsplash-search",
-      "name": "Search Unsplash for Image",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1120,
-        300
-      ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Process Unsplash response and select best image\nconst unsplashData = $input.first().json;\nconst titleData = $('Select Random Title').item.json;\nconst geminiContent = $('Generate Blog Content with Gemini').item.json;\n\nlet selectedImage = null;\n\nif (unsplashData.results && unsplashData.results.length > 0) {\n  // Select the first high-quality image\n  const image = unsplashData.results[0];\n  selectedImage = {\n    url: image.urls.regular,\n    downloadUrl: image.urls.full,\n    alt: image.alt_description || titleData.title,\n    photographer: image.user.name,\n    photographerUrl: image.user.links.html,\n    unsplashUrl: image.links.html\n  };\n}\n\nreturn [{\n  json: {\n    title: titleData.title,\n    content: geminiContent.response || geminiContent.text || geminiContent,\n    category: titleData.category,\n    rowNumber: titleData.rowNumber,\n    featuredImage: selectedImage,\n    status: 'draft',\n    publishDate: new Date().toISOString()\n  }\n}];"
-      },
-      "id": "process-data",
-      "name": "Process Blog Data",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1340,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "url": "={{ $json.featuredImage ? $json.featuredImage.downloadUrl : '' }}",
         "options": {
           "response": {
             "response": {
-              "neverError": true,
-              "responseFormat": "file"
+              "responseFormat": "json"
             }
           }
         }
       },
-      "id": "download-image",
-      "name": "Download Featured Image",
+      "id": "5",
+      "name": "Image Hunter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1560,
-        200
-      ],
-      "executeOnce": false,
-      "onError": "continueRegularOutput"
+        900,
+        400
+      ]
     },
     {
       "parameters": {
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "wordpressApi",
-        "resource": "post",
-        "operation": "create",
-        "title": "={{ $json.title }}",
-        "content": "={{ $json.content }}",
-        "additionalFields": {
-          "status": "draft",
-          "categories": "={{ $json.category }}",
-          "excerpt": "=Auto-generated blog post about {{ $json.title }}. Created with AI assistance.",
-          "featuredMedia": "={{ $('Upload Featured Image').item.json.id || '' }}"
-        }
-      },
-      "id": "wordpress-create",
-      "name": "Create WordPress Post",
-      "type": "n8n-nodes-base.wordpress",
-      "typeVersion": 1,
-      "position": [
-        1780,
-        300
-      ],
-      "credentials": {
-        "wordpressApi": {
-          "id": "wordpress-api",
-          "name": "WordPress API"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "url": "={{ $env.WORDPRESS_URL }}/wp-json/wp/v2/media",
-        "method": "POST",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
             {
-              "name": "Authorization",
-              "value": "=Basic {{ $env.WORDPRESS_AUTH_TOKEN }}"
+              "id": "title",
+              "name": "title",
+              "value": "={{ $('Process One by One').item(0).json.title }}",
+              "type": "string"
             },
             {
-              "name": "Content-Disposition",
-              "value": "=attachment; filename=\"{{ $('Process Blog Data').item.json.title.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() }}.jpg\""
+              "id": "slug",
+              "name": "slug",
+              "value": "={{ $('Process One by One').item(0).json.title.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/\\s+/g, '-').replace(/-+/g, '-').substring(0, 100) }}",
+              "type": "string"
+            },
+            {
+              "id": "content",
+              "name": "content",
+              "value": "={{ $('AI Content Writer').item(0).json.response || $('AI Content Writer').item(0).json.text || $('AI Content Writer').item(0).json.content || 'Generated content' }}",
+              "type": "string"
+            },
+            {
+              "id": "excerpt",
+              "name": "excerpt",
+              "value": "={{ ($('AI Content Writer').item(0).json.response || $('AI Content Writer').item(0).json.text || $('AI Content Writer').item(0).json.content || 'Generated content').substring(0, 150) + '...' }}",
+              "type": "string"
+            },
+            {
+              "id": "featured_image",
+              "name": "featured_image",
+              "value": "={{ $json.results && $json.results.length > 0 ? $json.results[0].urls.regular : null }}",
+              "type": "string"
+            },
+            {
+              "id": "category",
+              "name": "category",
+              "value": "={{ $('Process One by One').item(0).json.category || 'Technology' }}",
+              "type": "string"
+            },
+            {
+              "id": "tags",
+              "name": "tags",
+              "value": "=['automated', 'blog', 'ai-generated']",
+              "type": "array"
+            },
+            {
+              "id": "author_id",
+              "name": "author_id",
+              "value": "=1",
+              "type": "number"
+            },
+            {
+              "id": "status",
+              "name": "status",
+              "value": "draft",
+              "type": "string"
+            },
+            {
+              "id": "is_featured",
+              "name": "is_featured",
+              "value": "=false",
+              "type": "boolean"
+            },
+            {
+              "id": "published_at",
+              "name": "published_at",
+              "value": "=null",
+              "type": "string"
+            },
+            {
+              "id": "created_at",
+              "name": "created_at",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "updated_at",
+              "name": "updated_at",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
             }
           ]
         },
-        "sendBody": true,
-        "contentType": "binaryData",
-        "options": {}
+        "includeOtherFields": false
       },
-      "id": "upload-image",
-      "name": "Upload Featured Image",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "6",
+      "name": "Format Blog Post",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
-        1560,
+        1100,
         400
-      ],
-      "executeOnce": false,
-      "onError": "continueRegularOutput"
+      ]
     },
     {
       "parameters": {
-        "authentication": "oAuth2",
-        "resource": "sheet",
-        "operation": "update",
-        "documentId": "={{ $env.GOOGLE_SHEET_ID }}",
-        "sheetName": "Sheet1",
-        "range": "=C{{ $json.rowNumber }}",
-        "options": {
-          "dataStructure": "object"
+        "resource": "database",
+        "operation": "insert",
+        "schema": {
+          "mode": "name",
+          "value": "public"
         },
-        "dataToSend": "defineInNode",
-        "valueInputMode": "raw",
-        "rawData": "published"
-      },
-      "id": "update-sheet",
-      "name": "Mark as Published in Sheet",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.6,
-      "position": [
-        2000,
-        300
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "google-sheets-oauth",
-          "name": "Google Sheets OAuth2 API"
+        "table": {
+          "mode": "name",
+          "value": "blog_posts"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "title": "={{ $json.title }}",
+            "slug": "={{ $json.slug }}",
+            "content": "={{ $json.content }}",
+            "excerpt": "={{ $json.excerpt }}",
+            "featured_image": "={{ $json.featured_image }}",
+            "category": "={{ $json.category }}",
+            "tags": "={{ $json.tags }}",
+            "author_id": "={{ $json.author_id }}",
+            "status": "={{ $json.status }}",
+            "is_featured": "={{ $json.is_featured }}",
+            "published_at": "={{ $json.published_at }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}"
+          }
         }
       },
-      "onError": "continueRegularOutput"
+      "id": "7",
+      "name": "Save to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1300,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-db",
+          "name": "PostgreSQL Database"
+        }
+      }
     }
   ],
   "connections": {
-    "Every 6 Hours Trigger": {
+    "Blog Factory Timer": {
       "main": [
         [
           {
-            "node": "Get Blog Titles from Sheet",
+            "node": "Fetch Blog Ideas",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Blog Titles from Sheet": {
+    "Fetch Blog Ideas": {
       "main": [
         [
           {
-            "node": "Select Random Title",
+            "node": "Process One by One",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Select Random Title": {
+    "Process One by One": {
       "main": [
         [
           {
-            "node": "Generate Blog Content with Gemini",
+            "node": "AI Content Writer",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Generate Blog Content with Gemini": {
+    "AI Content Writer": {
       "main": [
         [
           {
-            "node": "Search Unsplash for Image",
+            "node": "Image Hunter",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Search Unsplash for Image": {
+    "Image Hunter": {
       "main": [
         [
           {
-            "node": "Process Blog Data",
+            "node": "Format Blog Post",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Process Blog Data": {
+    "Format Blog Post": {
       "main": [
         [
           {
-            "node": "Download Featured Image",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Upload Featured Image",
+            "node": "Save to Database",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Download Featured Image": {
+    "Save to Database": {
       "main": [
         [
           {
-            "node": "Upload Featured Image",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload Featured Image": {
-      "main": [
-        [
-          {
-            "node": "Create WordPress Post",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Create WordPress Post": {
-      "main": [
-        [
-          {
-            "node": "Mark as Published in Sheet",
+            "node": "Process One by One",
             "type": "main",
             "index": 0
           }
@@ -377,29 +371,11 @@
   },
   "pinData": {},
   "settings": {
-    "executionOrder": "v1",
-    "saveDataErrorExecution": "all",
-    "saveDataSuccessExecution": "all",
-    "saveExecutionProgress": true,
-    "saveManualExecutions": true,
-    "timezone": "UTC"
+    "executionOrder": "v1"
   },
-  "staticData": {},
-  "tags": [
-    {
-      "createdAt": "2025-01-20T12:00:00.000Z",
-      "updatedAt": "2025-01-20T12:00:00.000Z",
-      "id": "blog-automation",
-      "name": "Blog Automation"
-    },
-    {
-      "createdAt": "2025-01-20T12:00:00.000Z",
-      "updatedAt": "2025-01-20T12:00:00.000Z",
-      "id": "content-creation",
-      "name": "Content Creation"
-    }
-  ],
+  "staticData": null,
+  "tags": [],
   "triggerCount": 1,
-  "updatedAt": "2025-01-20T12:00:00.000Z",
-  "versionId": "1"
+  "updatedAt": "2025-01-08T16:00:00.000Z",
+  "versionId": "2"
 }
